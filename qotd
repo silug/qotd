@@ -14,7 +14,7 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 #
-# $Id: qotd,v 1.2 2000/07/11 20:48:02 steve Exp $
+# $Id: qotd,v 1.3 2000/07/11 21:27:18 steve Exp $
 
 use strict;
 
@@ -134,7 +134,25 @@ die "No quotes found.\n" if (!@quotes);
 
 my $fd=new FileHandle;
 
-listen_on(8000, $fd);
+listen_on("qotd", $fd);
+
+if ($> == 0)
+{
+    # We're running as root.  We need to drop privs.
+    # If there's a user "nobody" on this system,
+    # we'll use that.  If not, we'll bitch and moan.
+    my ($uid,$gid)=(getpwnam("nobody"))[2,3];
+    if ($uid && $gid)
+    {
+	$)="$gid $gid"; # Resets the default group and the supplemental groups.
+	$(=$gid;
+	$>=$<=$uid;
+    }
+    else
+    {
+	print STDERR "Can't switch to user 'nobody'!  getpwnam() failed: $!\n";
+    }
+}
 
 my $addr;
 my $conn=new FileHandle;
