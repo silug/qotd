@@ -1,0 +1,144 @@
+#!/usr/bin/perl -w
+#
+# qotd - Simple qotd server
+#
+# Copyright (C) 2000 Steven Pritchard <steve@silug.org>
+# This program is free software; you can redistribute it
+# and/or modify it under the same terms as Perl itself.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# $Id: qotd,v 1.1 2000/07/11 20:19:26 steve Exp $
+
+use strict;
+
+use Compress::Zlib;
+use FileHandle;
+use Socket;
+
+use vars qw(@quotes $count);
+
+sub getquotes()
+{
+    my ($line, $quote, @quotes);
+
+    my $gz=gzopen("lwall-quotes.txt.gz", "rb");
+    die "gzopen() failed: $gzerrno\n" if (!defined($gz));
+
+    while ($gz->gzreadline($line))
+    {
+        if ($line eq "%%\n")
+	{
+	    push(@quotes, $quote) if ($quote);
+	    $quote="";
+	}
+	else
+	{
+	    $quote.=$line;
+	}
+    }
+
+    $gz->gzclose();
+
+    return @quotes;
+}
+
+sub listen_on($\$)
+{
+    my $port=shift;
+    my $fd=shift;
+    my $tcp=getprotobyname("tcp");
+    socket($$fd, AF_INET, SOCK_STREAM, $tcp) or die "socket() failed: $!\n";
+    setsockopt($$fd, SOL_SOCKET, SO_REUSEADDR, pack("l", 1))
+        or die "setsockopt() failed: $!\n";
+    select((select($$fd), $|=1)[0]);
+    if ($port!~/^(\d+)$/)
+    {
+        $port=getservbyname("$port", "tcp")
+            or die "getservbyname() failed: $!\n";
+    }
+    bind($$fd, sockaddr_in($port, INADDR_ANY)) or die "bind() failed: $!\n";
+
+    listen($$fd, SOMAXCONN) or die "listen() failed: $!\n";
+}
+
+sub debug(@)
+{
+    if (defined($ENV{'DEBUG'}))
+    {
+	print STDERR @_, "\n";
+    }
+}
+
+sub child_exit_handler
+{
+    my $child;
+
+    # Unfortunately, you have to sit in a loop reaping children, or
+    # else you run the risk of missing child exits and leaving zombies.
+    for (;;)
+    {
+	# You really should use WNOHANG instead of 1,
+	# but I hate to use POSIX just for that...
+        $child=waitpid(-1, 1);
+        last unless ($child>0);
+        $count--;
+        debug("Child (PID $child) exited, count now $count.");
+    }
+}
+
+@quotes=getquotes;
+die "No quotes found.\n" if (!@quotes);
+
+my $fd=new FileHandle;
+
+listen_on(8000, $fd);
+
+my $addr;
+my $conn=new FileHandle;
+
+$SIG{'CHLD'}=\&child_exit_handler;
+
+$count=0;
+while ($addr=accept($conn, $fd))
+{   
+    # The following if hard-limits the number of child processes
+    # to 200.  This is a really stupid way to throttle incoming
+    # connections, but it works.  It's begging to be DoS'd though.
+    # For a real program, you should think about a better way of
+    # managing children.
+    if ($count<200) # Don't allow more than 200 children.
+    {   
+        my $child=fork;
+        if ($child>0)
+        {   
+            $count++;
+            $conn->close();
+	    debug("Child (PID $child) started, count now $count.");
+        }
+        elsif ($child==-1)
+        {   
+	    # fork() failed.  Drop the connection, print
+	    # an error, and hope the problem goes away.
+	    $conn->close();
+	    print STDERR "fork() failed: $!\n";
+        }
+        else
+        {   
+            # We're in the child.
+            print $conn $quotes[int(rand(@quotes))];
+            $conn->flush();
+	    $conn->close();
+	    exit 0;
+        }
+    }
+    else
+    {   
+	# Connection limit reached.  Drop the connection.
+	# The load should eventually go down.
+        $conn->close();
+	print STDERR "Connection limit reached!\n";
+    }
+}
