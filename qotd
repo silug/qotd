@@ -6,7 +6,7 @@
 # directory.  Get it from
 #     http://www.perl.com/CPAN/misc/lwall-quotes.txt.gz
 #
-# Copyright (C) 2000 Steven Pritchard <steve@silug.org>
+# Copyright (C) 2000-2005 Steven Pritchard <steve@silug.org>
 # This program is free software; you can redistribute it
 # and/or modify it under the same terms as Perl itself.
 #
@@ -14,70 +14,57 @@
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 #
-# $Id: qotd,v 1.4 2000/07/12 16:02:43 steve Exp $
+# $Id: qotd,v 1.5 2005/09/03 16:25:08 steve Exp $
 
 use strict;
+use warnings;
 
 use Compress::Zlib;
 use FileHandle;
 use Socket;
 
-use vars qw(@quotes $count);
+our @quotes;
+our $count;
 
-sub getquotes()
-{
+sub getquotes() {
     my ($line, $quote, @quotes);
 
-    if (-f "lwall-quotes.txt.gz")
-    {
+    if (-f "lwall-quotes.txt.gz") {
         my $gz=gzopen("lwall-quotes.txt.gz", "rb");
         die "gzopen() failed: $gzerrno\n" if (!defined($gz));
 
-        while ($gz->gzreadline($line))
-        {
-            if ($line eq "%%\n")
-            {
+        while ($gz->gzreadline($line)) {
+            if ($line eq "%%\n") {
                 push(@quotes, $quote) if ($quote);
                 $quote="";
-            }
-            else
-            {
+            } else {
                 $quote.=$line;
             }
         }
 
         $gz->gzclose();
-    }
-    elsif (-f "lwall-quotes.txt")
-    {
-	my $file=new FileHandle "<lwall-quotes.txt";
-	die "Can't open lwall-quotes.txt: $!\n" if (!defined($file));
+    } elsif (-f "lwall-quotes.txt") {
+        my $file=new FileHandle "<lwall-quotes.txt";
+        die "Can't open lwall-quotes.txt: $!\n" if (!defined($file));
 
-	while ($line=<$file>)
-	{
-	    if ($line eq "%%\n")
-	    {
-		push(@quotes, $quote) if ($quote);
-		$quote="";
-	    }
-	    else
-	    {
-		$quote.=$line;
-	    }
-	}
-    }
-    else
-    {
-	print STDERR "lwall-quotes.txt not found.\n";
-	exit 1;
+        while ($line=<$file>) {
+            if ($line eq "%%\n") {
+                push(@quotes, $quote) if ($quote);
+                $quote="";
+            } else {
+                $quote.=$line;
+            }
+        }
+    } else {
+        print STDERR "lwall-quotes.txt not found.\n";
+        exit 1;
     }
 
     return @quotes;
 }
 
 # Pass a port (name or number) and a filehandle.
-sub listen_on($\$)
-{
+sub listen_on($\$) {
     # This is pretty much boilerplate stuff
     # to bind to a port and start listening.
     my $port=shift;
@@ -92,8 +79,7 @@ sub listen_on($\$)
 
     select((select($$fd), $|=1)[0]);
 
-    if ($port!~/^(\d+)$/)
-    {
+    if ($port!~/^(\d+)$/) {
         $port=getservbyname($port, "tcp")
             or die "getservbyname() failed: $!\n";
     }
@@ -102,26 +88,22 @@ sub listen_on($\$)
     listen($$fd, SOMAXCONN) or die "listen() failed: $!\n";
 }
 
-sub debug(@)
-{
+sub debug(@) {
     # Set the DEBUG environment variable and you
     # will get some debugging messages on STDERR.
-    if (defined($ENV{'DEBUG'}))
-    {
-	print STDERR @_, "\n";
+    if (defined($ENV{'DEBUG'})) {
+        print STDERR @_, "\n";
     }
 }
 
-sub child_exit_handler
-{
+sub child_exit_handler {
     my $child;
 
     # Unfortunately, you have to sit in a loop reaping children, or
     # else you run the risk of missing child exits and leaving zombies.
-    for (;;)
-    {
-	# You really should use WNOHANG instead of 1,
-	# but I hate to use POSIX just for that...
+    for (;;) {
+        # You really should use WNOHANG instead of 1,
+        # but I hate to use POSIX just for that...
         $child=waitpid(-1, 1);
         last unless ($child>0);
         $count--;
@@ -136,21 +118,17 @@ my $fd=new FileHandle;
 
 listen_on("qotd", $fd);
 
-if ($> == 0)
-{
+if ($> == 0) {
     # We're running as root.  We need to drop privs.
     # If there's a user "nobody" on this system,
     # we'll use that.  If not, we'll bitch and moan.
     my ($uid,$gid)=(getpwnam("nobody"))[2,3];
-    if ($uid && $gid)
-    {
-	$)="$gid $gid"; # Resets the default group and the supplemental groups.
-	$(=$gid;
-	$>=$<=$uid;
-    }
-    else
-    {
-	print STDERR "Can't switch to user 'nobody'!  getpwnam() failed: $!\n";
+    if ($uid && $gid) {
+        $)="$gid $gid"; # Resets the default group and the supplemental groups.
+        $(=$gid;
+        $>=$<=$uid;
+    } else {
+        print STDERR "Can't switch to user 'nobody'!  getpwnam() failed: $!\n";
     }
 }
 
@@ -160,43 +138,36 @@ my $conn=new FileHandle;
 $SIG{'CHLD'}=\&child_exit_handler;
 
 $count=0;
-while ($addr=accept($conn, $fd))
-{   
+while ($addr=accept($conn, $fd)) {
     # The following if hard-limits the number of child processes
     # to 200.  This is a really stupid way to throttle incoming
     # connections, but it works.  It's begging to be DoS'd though.
     # For a real program, you should think about a better way of
     # managing children.
-    if ($count<200) # Don't allow more than 200 children.
-    {   
+    if ($count<200) {
         my $child=fork;
-        if ($child>0)
-        {   
+        if ($child>0) {
             $count++;
             $conn->close();
-	    debug("Child (PID $child) started, count now $count.");
-        }
-        elsif ($child==-1)
-        {   
-	    # fork() failed.  Drop the connection, print
-	    # an error, and hope the problem goes away.
-	    $conn->close();
-	    print STDERR "fork() failed: $!\n";
-        }
-        else
-        {   
+            debug("Child (PID $child) started, count now $count.");
+        } elsif ($child==-1) {
+            # fork() failed.  Drop the connection, print
+            # an error, and hope the problem goes away.
+            $conn->close();
+            print STDERR "fork() failed: $!\n";
+        } else {
             # We're in the child.
             print $conn $quotes[int(rand(@quotes))];
             $conn->flush();
-	    $conn->close();
-	    exit 0;
+            $conn->close();
+            exit 0;
         }
-    }
-    else
-    {   
-	# Connection limit reached.  Drop the connection.
-	# The load should eventually go down.
+    } else {
+        # Connection limit reached.  Drop the connection.
+        # The load should eventually go down.
         $conn->close();
-	print STDERR "Connection limit reached!\n";
+        print STDERR "Connection limit reached!\n";
     }
 }
+
+# vi: set ai et:
