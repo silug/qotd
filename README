@@ -1,0 +1,8 @@
+According to http://springfield.pm.org/meetings/ this was originally
+written for the July 11, 2000 Springfield.pm meeting as an example of a
+simple daemon (which uses Socket.pm, fork(), and other stuff).
+
+This script expects to find lwall-quotes.txt.gz in the current
+directory.  Get it from
+
+  http://www.perl.com/CPAN/misc/lwall-quotes.txt.gz
